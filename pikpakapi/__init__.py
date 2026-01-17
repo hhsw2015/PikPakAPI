@@ -453,6 +453,74 @@ class PikPakApi:
         result = await self._request_post(download_url, download_data)
         return result
 
+    @staticmethod
+    def parse_pikpak_url(pikpak_url: str) -> Dict[str, str]:
+        """
+        Parse PikPak rapid upload URL format:
+        PikPak://{name}|{size}|{hash}
+        """
+        if not pikpak_url.startswith("PikPak://"):
+            raise PikpakException("Invalid PikPak URL format")
+        payload = pikpak_url[len("PikPak://") :]
+        parts = payload.split("|")
+        if len(parts) < 3:
+            raise PikpakException("Invalid PikPak URL format")
+        name = parts[0]
+        size = parts[1]
+        file_hash = parts[2]
+        if not name or not size or not file_hash:
+            raise PikpakException("Invalid PikPak URL format")
+        return {"name": name, "size": size, "hash": file_hash}
+
+    async def instant_upload(
+        self,
+        pikpak_url: Optional[str] = None,
+        *,
+        name: Optional[str] = None,
+        size: Optional[int | str] = None,
+        file_hash: Optional[str] = None,
+        parent_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Rapid upload by PikPak URL or explicit params.
+        If parent_id is None, the API uses the account default directory rule.
+        """
+        if pikpak_url:
+            parsed = self.parse_pikpak_url(pikpak_url)
+            name = parsed["name"]
+            size = parsed["size"]
+            file_hash = parsed["hash"]
+        if not name or size is None or not file_hash:
+            raise PikpakException("name/size/hash is required for instant upload")
+
+        upload_url = f"https://{self.PIKPAK_API_HOST}/drive/v1/files"
+        data = {
+            "kind": "drive#file",
+            "name": name,
+            "size": str(size),
+            "hash": file_hash,
+            "upload_type": "UPLOAD_TYPE_RESUMABLE",
+            "objProvider": {"provider": "UPLOAD_TYPE_UNKNOWN"},
+        }
+        if parent_id:
+            data["parent_id"] = parent_id
+
+        result = await self._request_post(upload_url, data)
+        return result
+
+    async def instant_upload_list(
+        self, pikpak_urls: List[str], parent_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Batch rapid upload.
+        """
+        results = []
+        for url in pikpak_urls:
+            if not url:
+                continue
+            results.append(await self.instant_upload(url, parent_id=parent_id))
+        return results
+
     async def offline_list(
         self,
         size: int = 10000,
